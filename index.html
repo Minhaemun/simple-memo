@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>간단 메모장</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#fff;color:#222;font:16px/1.5 system-ui,sans-serif}
+main{width:min(640px,100%);margin:48px auto;padding:0 18px}
+h1{font-size:24px;margin:0 0 18px}section{border:1px solid #ddd;border-radius:10px;padding:18px;margin:12px 0}
+label{display:block;margin:10px 0 4px}input,textarea,button{font:inherit;width:100%;padding:11px;border:1px solid #bbb;border-radius:7px}
+textarea{min-height:120px;resize:vertical}button{background:#222;color:#fff;border:0;margin-top:10px;cursor:pointer}
+.row{display:flex;gap:8px}.row button{flex:1}.secondary{background:#666}.danger{background:#a22;width:auto;margin:0;padding:7px 12px}
+#app,#auth{display:none}.memo{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;border-top:1px solid #eee;padding:12px 0}.memo-text{white-space:pre-wrap;overflow-wrap:anywhere}.status{min-height:24px;color:#555}
+@media(max-width:480px){main{margin:24px auto}.row{gap:6px}}
+</style>
+</head>
+<body><main>
+<h1>간단 메모장</h1>
+<p id="status" class="status" role="status"></p>
+<section id="auth">
+<label for="email">이메일</label><input id="email" type="email" autocomplete="email">
+<label for="password">비밀번호</label><input id="password" type="password" autocomplete="current-password">
+<div class="row"><button id="signup">회원가입</button><button id="login" class="secondary">로그인</button></div>
+</section>
+<section id="app">
+<div class="row"><strong id="who"></strong><button id="logout" class="secondary">로그아웃</button></div>
+<label for="content">메모 내용</label><textarea id="content" placeholder="메모를 입력하세요"></textarea>
+<button id="save">저장</button>
+<div id="memos"></div>
+</section>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const client=supabase.createClient("https://jpuddmejjevzlytpwfds.supabase.co","sb_publishable_89ZDGPwD6IunZ-uAeERieA_bDq49wJE");
+const auth=document.querySelector("#auth"),app=document.querySelector("#app"),status=document.querySelector("#status");
+const email=document.querySelector("#email"),password=document.querySelector("#password"),content=document.querySelector("#content");
+function say(text){status.textContent=text}
+async function showSession(session){
+ const signedIn=!!session;auth.style.display=signedIn?"none":"block";app.style.display=signedIn?"block":"none";
+ if(signedIn){document.querySelector("#who").textContent=session.user.email||"로그인됨";await loadMemos()}
+}
+async function loadMemos(){
+ const {data,error}=await client.from("memos").select("id,content,created_at").order("created_at",{ascending:false});
+ if(error){say("메모를 불러오지 못했습니다: "+error.message);return}
+ const list=document.querySelector("#memos");list.replaceChildren();
+ for(const memo of data){const row=document.createElement("div");row.className="memo";
+ const body=document.createElement("div");body.className="memo-text";body.textContent=memo.content;
+ const del=document.createElement("button");del.className="danger";del.textContent="삭제";del.onclick=()=>deleteMemo(memo.id);
+ row.append(body,del);list.append(row)}
+}
+async function authenticate(kind){
+ const e=email.value.trim(),p=password.value;if(!e||!p){say("이메일과 비밀번호를 입력하세요.");return}
+ say("처리 중…");
+ const {data,error}=kind==="signup"?await client.auth.signUp({email:e,password:p}):await client.auth.signInWithPassword({email:e,password:p});
+ if(error){say("인증 오류: "+error.message);return}
+ if(kind==="signup"&&!data.session){say("이메일 확인이 필요합니다. 프로젝트 인증 설정을 확인하세요.");return}
+ say("");await showSession(data.session)
+}
+document.querySelector("#signup").onclick=()=>authenticate("signup");
+document.querySelector("#login").onclick=()=>authenticate("login");
+document.querySelector("#logout").onclick=async()=>{const {error}=await client.auth.signOut();say(error?"로그아웃 오류: "+error.message:"");if(!error)await showSession(null)};
+document.querySelector("#save").onclick=async()=>{
+ const text=content.value.trim();if(!text){say("메모 내용을 입력하세요.");return}
+ const button=document.querySelector("#save");button.disabled=true;button.textContent="저장 중…";say("");
+ const {data:{user},error:userError}=await client.auth.getUser();
+ const {error}=userError?{error:userError}:await client.from("memos").insert({user_id:user.id,content:text});
+ button.disabled=false;button.textContent="저장";
+ if(error){say("저장 오류: "+error.message);return}
+ content.value="";say("저장했습니다.");await loadMemos()
+};
+async function deleteMemo(id){const {error}=await client.from("memos").delete().eq("id",id);say(error?"삭제 오류: "+error.message:"");if(!error)await loadMemos()}
+client.auth.onAuthStateChange((_event,session)=>{showSession(session)});
+client.auth.getSession().then(({data,error})=>{if(error)say("상태 확인 오류: "+error.message);showSession(data.session)});
+</script></body></html>
